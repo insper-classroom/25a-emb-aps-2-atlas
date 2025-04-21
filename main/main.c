@@ -30,13 +30,13 @@ QueueHandle_t xActionQueue;
 
 void btn_callback(uint gpio, uint32_t events) {
     if (gpio == BTN_PRIMARY_FIRE && events == 0x4) { // fall edge
-        xQueueSend(xInputQueue, &gpio, 0);
+        xQueueSendFromISR(xInputQueue, &gpio, 0);
     } else if (gpio == BTN_SECONDARY_FIRE && events == 0x4) {
-        xQueueSend(xInputQueue, &gpio, 0);
+        xQueueSendFromISR(xInputQueue, &gpio, 0);
     } else if (gpio == BTN_INTERACT && events == 0x4) {
-        xQueueSend(xInputQueue, &gpio, 0);
+        xQueueSendFromISR(xInputQueue, &gpio, 0);
     } else if (gpio == BTN_JUMP && events == 0x4) {
-        xQueueSend(xInputQueue, &gpio, 0);
+        xQueueSendFromISR(xInputQueue, &gpio, 0);
     }
 }
 
@@ -65,18 +65,18 @@ void process_input_task(void *p) {
         int btn;
         if (xQueueReceive(xInputQueue, &btn, 1e6)) {
             switch (btn) {
-                case BTN_PRIMARY_FIRE:
-                    xQueueSend(xActionQueue, &btn, 0);
-                    break;
-                case BTN_SECONDARY_FIRE:
-                    xQueueSend(xActionQueue, &btn, 0);
-                    break;
-                case BTN_INTERACT:
-                    xQueueSend(xActionQueue, &btn, 0);
-                    break;
-                case BTN_JUMP:
-                    xQueueSend(xActionQueue, &btn, 0);
-                    break;
+            case BTN_PRIMARY_FIRE:
+                xQueueSend(xActionQueue, &btn, 0);
+                break;
+            case BTN_SECONDARY_FIRE:
+                xQueueSend(xActionQueue, &btn, 0);
+                break;
+            case BTN_INTERACT:
+                xQueueSend(xActionQueue, &btn, 0);
+                break;
+            case BTN_JUMP:
+                xQueueSend(xActionQueue, &btn, 0);
+                break;
             }
         }
 
