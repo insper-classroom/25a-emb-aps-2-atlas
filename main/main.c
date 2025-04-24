@@ -7,24 +7,37 @@
 #include <stdio.h>
 #include "hardware/adc.h"
 #include "hardware/uart.h"
+#include "hardware/i2c.h"
+#include "mpu6050.h"
+#include "Fusion.h"
 
 typedef struct adc {
     int axis;
     int val;
 } adc_t;
 
+typedef struct pos {
+    int axis;
+    float val;
+} pos_t;
+
 #define UART_ID uart0
+#define SAMPLE_PERIOD (0.01f) // replace this with actual sample period
 #define BAUD_RATE 115200
 
 #define UART_TX_PIN 0
 #define UART_RX_PIN 1
 
-const int BTN_PRIMARY_FIRE = 2;
-const int BTN_SECONDARY_FIRE = 3;
-const int BTN_INTERACT = 4;
-const int BTN_JUMP = 5;
+const int BTN_PRIMARY_FIRE = 6;
+const int BTN_SECONDARY_FIRE = 7;
+const int BTN_INTERACT = 8;
+const int BTN_JUMP = 9;
+const int MPU_ADDRESS = 0x68;
+const int I2C_SDA_GPIO = 4;
+const int I2C_SCL_GPIO = 5;
 
 QueueHandle_t xMovementQueue;
+QueueHandle_t xAimQueue;
 QueueHandle_t xInputQueue;
 QueueHandle_t xActionQueue;
 
@@ -63,24 +76,26 @@ void process_input_task(void *p) {
 
     while (1) {
         int btn;
+        int val = 0;
         if (xQueueReceive(xInputQueue, &btn, 1e6)) {
             switch (btn) {
             case BTN_PRIMARY_FIRE:
-                xQueueSend(xActionQueue, &btn, 0);
+                val = 1;
                 break;
             case BTN_SECONDARY_FIRE:
-                xQueueSend(xActionQueue, &btn, 0);
+                val = 2;
                 break;
             case BTN_INTERACT:
-                xQueueSend(xActionQueue, &btn, 0);
+                val = 3;
                 break;
             case BTN_JUMP:
-                xQueueSend(xActionQueue, &btn, 0);
+                val = 4;
                 break;
             }
         }
 
-        vTaskDelay(pdMS_TO_TICKS(50));
+        xQueueSend(xActionQueue, &val, 0);
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
 
@@ -88,28 +103,32 @@ void x_task(void *p) {
     adc_init();
     adc_gpio_init(26);
 
-    int vec[5] = {0, 0, 0, 0, 0};
     while (1) {
         adc_select_input(0);
         int result = adc_read();
         result = (result - 2048) / 14;
 
-        vec[0] = vec[1];
-        vec[1] = vec[2];
-        vec[2] = vec[3];
-        vec[3] = vec[4];
-        vec[4] = result;
-        result = (vec[4] + vec[3] + vec[2] + vec[1] + vec[0]) / 5;
-
-        if (result >= 30 || result <= -30) {
+        if (result < 30 && result > -30) {
             adc_t adc_x_data;
             adc_x_data.axis = 0;
-            adc_x_data.val = result;
+            adc_x_data.val = 0;
+
+            xQueueSend(xMovementQueue, &adc_x_data, 0);
+        } else if (result >= 30) {
+            adc_t adc_x_data;
+            adc_x_data.axis = 0;
+            adc_x_data.val = 1;
+
+            xQueueSend(xMovementQueue, &adc_x_data, 0);
+        } else if (result <= -30) {
+            adc_t adc_x_data;
+            adc_x_data.axis = 0;
+            adc_x_data.val = 2;
 
             xQueueSend(xMovementQueue, &adc_x_data, 0);
         }
 
-        vTaskDelay(pdMS_TO_TICKS(50));
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
 
@@ -117,55 +136,151 @@ void y_task(void *p) {
     adc_init();
     adc_gpio_init(27);
 
-    int vec[5] = {0, 0, 0, 0, 0};
     while (1) {
         adc_select_input(1);
         int result = adc_read();
         result = (result - 2048) / 14;
 
-        vec[0] = vec[1];
-        vec[1] = vec[2];
-        vec[2] = vec[3];
-        vec[3] = vec[4];
-        vec[4] = result;
-        result = (vec[4] + vec[3] + vec[2] + vec[1] + vec[0]) / 5;
-
-        if (result >= 30 || result <= -30) {
+        if (result < 30 && result > -30) {
             adc_t adc_y_data;
             adc_y_data.axis = 1;
-            adc_y_data.val = result;
+            adc_y_data.val = 0;
+
+            xQueueSend(xMovementQueue, &adc_y_data, 0);
+        } else if (result >= 30) {
+            adc_t adc_y_data;
+            adc_y_data.axis = 1;
+            adc_y_data.val = 1;
+
+            xQueueSend(xMovementQueue, &adc_y_data, 0);
+        } else if (result <= -30) {
+            adc_t adc_y_data;
+            adc_y_data.axis = 1;
+            adc_y_data.val = 2;
 
             xQueueSend(xMovementQueue, &adc_y_data, 0);
         }
 
-        vTaskDelay(pdMS_TO_TICKS(50));
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+}
+
+static void mpu6050_reset() {
+    // Two byte reset. First byte register, second byte data
+    // There are a load more options to set up the device in different ways that could be added here
+    uint8_t buf[] = {0x6B, 0x00};
+    i2c_write_blocking(i2c_default, MPU_ADDRESS, buf, 2, false);
+}
+
+static void mpu6050_read_raw(int16_t accel[3], int16_t gyro[3], int16_t *temp) {
+    // For this particular device, we send the device the register we want to read
+    // first, then subsequently read from the device. The register is auto incrementing
+    // so we don't need to keep sending the register we want, just the first.
+
+    uint8_t buffer[6];
+
+    // Start reading acceleration registers from register 0x3B for 6 bytes
+    uint8_t val = 0x3B;
+    i2c_write_blocking(i2c_default, MPU_ADDRESS, &val, 1, true); // true to keep master control of bus
+    i2c_read_blocking(i2c_default, MPU_ADDRESS, buffer, 6, false);
+
+    for (int i = 0; i < 3; i++) {
+        accel[i] = (buffer[i * 2] << 8 | buffer[(i * 2) + 1]);
+    }
+
+    // Now gyro data from reg 0x43 for 6 bytes
+    // The register is auto incrementing on each read
+    val = 0x43;
+    i2c_write_blocking(i2c_default, MPU_ADDRESS, &val, 1, true);
+    i2c_read_blocking(i2c_default, MPU_ADDRESS, buffer, 6, false); // False - finished with bus
+
+    for (int i = 0; i < 3; i++) {
+        gyro[i] = (buffer[i * 2] << 8 | buffer[(i * 2) + 1]);
+        ;
+    }
+
+    // Now temperature from reg 0x41 for 2 bytes
+    // The register is auto incrementing on each read
+    val = 0x41;
+    i2c_write_blocking(i2c_default, MPU_ADDRESS, &val, 1, true);
+    i2c_read_blocking(i2c_default, MPU_ADDRESS, buffer, 2, false); // False - finished with bus
+
+    *temp = buffer[0] << 8 | buffer[1];
+}
+
+void mpu6050_task(void *p) {
+    // configuracao do I2C
+    i2c_init(i2c_default, 400 * 1000);
+    gpio_set_function(I2C_SDA_GPIO, GPIO_FUNC_I2C);
+    gpio_set_function(I2C_SCL_GPIO, GPIO_FUNC_I2C);
+    gpio_pull_up(I2C_SDA_GPIO);
+    gpio_pull_up(I2C_SCL_GPIO);
+
+    mpu6050_reset();
+    int16_t acceleration[3], gyro[3], temp;
+
+    FusionAhrs ahrs;
+    FusionAhrsInitialise(&ahrs);
+
+    while (1) {
+        pos_t pos_data;
+
+        // leitura da MPU, com fusão de dados
+        mpu6050_read_raw(acceleration, gyro, &temp);
+        FusionVector gyroscope = {
+            .axis.x = gyro[0] / 131.0f, // Conversão para graus/s
+            .axis.y = gyro[1] / 131.0f,
+            .axis.z = gyro[2] / 131.0f,
+        };
+
+        FusionVector accelerometer = {
+            .axis.x = acceleration[0] / 16384.0f, // Conversão para g
+            .axis.y = acceleration[1] / 16384.0f,
+            .axis.z = acceleration[2] / 16384.0f,
+        };
+
+        FusionAhrsUpdateNoMagnetometer(&ahrs, gyroscope, accelerometer, SAMPLE_PERIOD);
+
+        const FusionEuler euler = FusionQuaternionToEuler(FusionAhrsGetQuaternion(&ahrs));
+
+        // printf("Acc. X = %d, Y = %d, Z = %d\n", acceleration[0], acceleration[1], acceleration[2]);
+        // printf("Roll %0.1f, Pitch %0.1f, Yaw %0.1f\n", euler.angle.roll, euler.angle.pitch, euler.angle.yaw);
+        // printf("Temp. = %f\n", (temp / 340.0) + 36.53);
+
+        if (euler.angle.pitch != 0) {
+            pos_data.axis = 0;
+            pos_data.val = euler.angle.pitch;
+            xQueueSend(xAimQueue, &pos_data, 0);
+        }
+
+        if (euler.angle.roll != 0) {
+            pos_data.axis = 1;
+            pos_data.val = euler.angle.roll;
+            xQueueSend(xAimQueue, &pos_data, 0);
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
 
 void uart_task(void *p) {
-    adc_t data;
+    adc_t data_movement;
+    pos_t data_aim;
+
     while (true) {
-        if (xQueueReceive(xMovementQueue, &data, 1e6)) {
-            // printf("Eixo: %d, Valor: %d\n", data.axis, data.val);
-            uint8_t axis = (uint8_t)data.axis;
-            uint16_t val = (uint16_t)(data.val & 0xFFFF);
-            uint8_t lsb = val & 0xFF;
-            uint8_t msb = (val >> 8) & 0xFF;
+        if (xQueueReceive(xAimQueue, &data_aim, 1e6) && xQueueReceive(xMovementQueue, &data_movement, 1e6)) {
+            uint8_t axis_aim = (uint8_t)data_aim.axis;
+            int32_t val_aim = -1 * (int32_t)data_aim.val & 0xFFFF;
+            uint8_t lsb = val_aim & 0xFF;
+            uint8_t msb = (val_aim >> 8) & 0xFF;
+
+            uint8_t axis_movement = (uint8_t)data_movement.axis;
+            uint8_t val_movement = (uint8_t)data_movement.val;
+
             uint8_t end = 0xFF;
 
-            uint8_t pacote[4] = {axis, lsb, msb, end};
-            uart_write_blocking(UART_ID, pacote, 4);
-        }
-        if (xQueueReceive(xActionQueue, &data, 1e6)) {
-            // printf("Eixo: %d, Valor: %d\n", data.axis, data.val);
-            uint8_t axis = (uint8_t)data.axis;
-            uint16_t val = (uint16_t)(data.val & 0xFFFF);
-            uint8_t lsb = val & 0xFF;
-            uint8_t msb = (val >> 8) & 0xFF;
-            uint8_t end = 0xFF;
-
-            uint8_t pacote[4] = {axis, lsb, msb, end};
-            uart_write_blocking(UART_ID, pacote, 4);
+            uint8_t pacote[6] = {axis_aim, lsb, msb, axis_movement, val_movement, end};
+            uart_write_blocking(UART_ID, pacote, sizeof(pacote));
         }
     }
 }
@@ -179,14 +294,16 @@ int main() {
     xInputQueue = xQueueCreate(32, sizeof(int));
     xActionQueue = xQueueCreate(32, sizeof(int));
     xMovementQueue = xQueueCreate(32, sizeof(adc_t));
+    xAimQueue = xQueueCreate(32, sizeof(pos_t));
 
-    if (xInputQueue == NULL || xMovementQueue)
+    if (xInputQueue == NULL || xActionQueue == NULL || xMovementQueue == NULL || xAimQueue == NULL)
         printf("falha em criar a fila \n");
 
     xTaskCreate(process_input_task, "Process Input Task", 256, NULL, 1, NULL);
     xTaskCreate(x_task, "ADC X Task", 4095, NULL, 1, NULL);
     xTaskCreate(y_task, "ADC Y Task", 4095, NULL, 1, NULL);
     xTaskCreate(uart_task, "UART Task", 4095, NULL, 1, NULL);
+    xTaskCreate(mpu6050_task, "mpu6050_Task 1", 8192, NULL, 1, NULL);
 
     vTaskStartScheduler();
 

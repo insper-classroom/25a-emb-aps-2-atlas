@@ -27,6 +27,7 @@ pico_sdk_init()
 
 # rest of your project
 
+add_subdirectory(Fusion)
 add_subdirectory(freertos)
 add_subdirectory(main)
 
