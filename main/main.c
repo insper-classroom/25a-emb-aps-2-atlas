@@ -266,9 +266,16 @@ void mpu6050_task(void *p) {
 void uart_task(void *p) {
     adc_t data_movement;
     pos_t data_aim;
+    int action = 0;
 
     while (true) {
-        if (xQueueReceive(xAimQueue, &data_aim, 1e6) && xQueueReceive(xMovementQueue, &data_movement, 1e6)) {
+        if (xQueueReceive(xAimQueue, &data_aim, 1e6) &&
+            xQueueReceive(xMovementQueue, &data_movement, 1e6)) {
+
+            if (xQueueReceive(xActionQueue, &action, 0) != pdTRUE) {
+                action = 0;
+            }
+
             uint8_t axis_aim = (uint8_t)data_aim.axis;
             int32_t val_aim = -1 * (int32_t)data_aim.val & 0xFFFF;
             uint8_t lsb = val_aim & 0xFF;
@@ -277,9 +284,11 @@ void uart_task(void *p) {
             uint8_t axis_movement = (uint8_t)data_movement.axis;
             uint8_t val_movement = (uint8_t)data_movement.val;
 
+            uint8_t action_byte = (uint8_t)action;
             uint8_t end = 0xFF;
 
-            uint8_t pacote[6] = {axis_aim, lsb, msb, axis_movement, val_movement, end};
+            // Novo pacote com 7 bytes incluindo a ação
+            uint8_t pacote[7] = {axis_aim, lsb, msb, axis_movement, val_movement, action_byte, end};
             uart_write_blocking(UART_ID, pacote, sizeof(pacote));
         }
     }

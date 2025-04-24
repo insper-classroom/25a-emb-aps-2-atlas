@@ -8,49 +8,45 @@ import pyautogui
 
 pyautogui.PAUSE = 0
 
-# Armazenar o estado atual das teclas
 current_keys = {'w': False, 'a': False, 's': False, 'd': False}
 
 
 def movement(axis, value):
-    axis_keys = {
-        0: {'positive': 'w', 'negative': 's'},
-        1: {'positive': 'd', 'negative': 'a'}
-    }
+    if axis == 0:
+        tecla_para_cima = 'w'
+        tecla_para_baixo = 's'
+    elif axis == 1:
+        tecla_para_cima = 'd'
+        tecla_para_baixo = 'a'
+    else:
+        return
 
-    if axis in axis_keys:
-        # Determina as teclas para o eixo atual
-        positive_key = axis_keys[axis]['positive']
-        negative_key = axis_keys[axis]['negative']
+    if value == 1:
+        if not current_keys[tecla_para_cima]:
+            pyautogui.keyDown(tecla_para_cima)
+            current_keys[tecla_para_cima] = True
 
-        # Processa o valor do analógico
-        if value == 1:  # Direção positiva
-            if not current_keys[positive_key]:
-                pyautogui.keyDown(positive_key)
-                current_keys[positive_key] = True
-            # Garante que a tecla oposta seja liberada
-            if current_keys[negative_key]:
-                pyautogui.keyUp(negative_key)
-                current_keys[negative_key] = False
+        if current_keys[tecla_para_baixo]:
+            pyautogui.keyUp(tecla_para_baixo)
+            current_keys[tecla_para_baixo] = False
 
-        elif value == 2:  # Direção negativa
-            if not current_keys[negative_key]:
-                pyautogui.keyDown(negative_key)
-                current_keys[negative_key] = True
-            # Garante que a tecla oposta seja liberada
-            if current_keys[positive_key]:
-                pyautogui.keyUp(positive_key)
-                current_keys[positive_key] = False
+    elif value == 2:
+        if not current_keys[tecla_para_baixo]:
+            pyautogui.keyDown(tecla_para_baixo)
+            current_keys[tecla_para_baixo] = True
 
-        else:  # Valor neutro (próximo de zero) - libera ambas as teclas
-            # Libera tecla positiva se estiver pressionada
-            if current_keys[positive_key]:
-                pyautogui.keyUp(positive_key)
-                current_keys[positive_key] = False
-            # Libera tecla negativa se estiver pressionada
-            if current_keys[negative_key]:
-                pyautogui.keyUp(negative_key)
-                current_keys[negative_key] = False
+        if current_keys[tecla_para_cima]:
+            pyautogui.keyUp(tecla_para_cima)
+            current_keys[tecla_para_cima] = False
+
+    else:
+        if current_keys[tecla_para_cima]:
+            pyautogui.keyUp(tecla_para_cima)
+            current_keys[tecla_para_cima] = False
+
+        if current_keys[tecla_para_baixo]:
+            pyautogui.keyUp(tecla_para_baixo)
+            current_keys[tecla_para_baixo] = False
 
 
 def aim(axis, value):
@@ -82,7 +78,8 @@ def action(value):
 def controle(ser):
     """
     Loop principal que lê bytes da porta serial em loop infinito.
-    Aguarda o byte 0xFF e então lê 3 bytes: axis (1 byte) + valor (2 bytes).
+    Aguarda o byte 0xFF e então lê 6 bytes: 
+    axis_aim (1 byte) + valor_aim (2 bytes) + axis_movement (1 byte) + valor_movement (1 byte) + action (1 byte)
     """
     while True:
         # Aguardar byte de sincronização
@@ -90,15 +87,21 @@ def controle(ser):
         if not sync_byte:
             continue
         if sync_byte[0] == 0xFF:
-            # Ler 5 bytes (axis + valor(2b) + axis_movement + valor(1b))
-            data = ser.read(size=5)
-            
-            if len(data) < 5:
+            # Ler 6 bytes (axis_aim + valor_aim(2b) + axis_movement + valor_movement(1b) + action(1b))
+            data = ser.read(size=6)
+
+            if len(data) < 6:
                 continue
 
-            axis_aim, value_aim, axis_movement, value_movement = parse_data(data)
+            axis_aim, value_aim, axis_movement, value_movement, action_value = parse_data(
+                data)
             movement(axis_movement, value_movement)
             aim(axis_aim, value_aim)
+
+            # Processar a ação se o valor não for zero
+            if action_value > 0:
+                action(action_value)
+
 
 def serial_ports():
     """Retorna uma lista das portas seriais disponíveis na máquina."""
@@ -135,13 +138,14 @@ def serial_ports():
 
 
 def parse_data(data):
-    """Interpreta os dados recebidos do buffer (axis + valor)."""
+    """Interpreta os dados recebidos do buffer (axis_aim + valor_aim + axis_movement + valor_movement + action)."""
     axis_aim = data[0]
-    axis_movement = data[3]
     value_aim = int.from_bytes(data[1:3], byteorder='little', signed=True)
+    axis_movement = data[3]
     value_movement = data[4]
+    action_value = data[5]
 
-    return axis_aim, value_aim, axis_movement, value_movement
+    return axis_aim, value_aim, axis_movement, value_movement, action_value
 
 
 def conectar_porta(port_name, root, botao_conectar, status_label, mudar_cor_circulo):
