@@ -10,6 +10,7 @@
 #include "hardware/i2c.h"
 #include "mpu6050.h"
 #include "Fusion.h"
+#include "hc06.h"
 
 typedef struct adc {
     int axis;
@@ -28,13 +29,13 @@ typedef struct pos {
 #define UART_TX_PIN 0
 #define UART_RX_PIN 1
 
-const int BTN_PRIMARY_FIRE = 6;
-const int BTN_SECONDARY_FIRE = 7;
-const int BTN_INTERACT = 8;
-const int BTN_JUMP = 9;
+const int BTN_PRIMARY_FIRE = 10;
+const int BTN_SECONDARY_FIRE = 11;
+const int BTN_INTERACT = 12;
+const int BTN_JUMP = 13;
 const int MPU_ADDRESS = 0x68;
-const int I2C_SDA_GPIO = 4;
-const int I2C_SCL_GPIO = 5;
+const int I2C_SDA_GPIO = 8;
+const int I2C_SCL_GPIO = 9;
 
 QueueHandle_t xMovementQueue;
 QueueHandle_t xAimQueue;
@@ -51,6 +52,15 @@ void btn_callback(uint gpio, uint32_t events) {
     } else if (gpio == BTN_JUMP && events == 0x4) {
         xQueueSendFromISR(xInputQueue, &gpio, 0);
     }
+}
+
+void send_actions(int val) {
+    uint8_t action_byte = (uint8_t)val;
+    uint8_t end = 0xFF;
+
+    // Novo pacote com 7 bytes incluindo a ação
+    uint8_t pacote[2] = {action_byte, end};
+    uart_write_blocking(HC06_UART_ID, pacote, sizeof(pacote));
 }
 
 void process_input_task(void *p) {
@@ -263,7 +273,14 @@ void mpu6050_task(void *p) {
     }
 }
 
-void uart_task(void *p) {
+void hc06_task(void *p) {
+    uart_init(HC06_UART_ID, HC06_BAUD_RATE);
+    gpio_set_function(HC06_TX_PIN, GPIO_FUNC_UART);
+    gpio_set_function(HC06_RX_PIN, GPIO_FUNC_UART);
+    hc06_init("P-Body", "1234");
+
+    printf("HC-06 ready\n");
+
     adc_t data_movement;
     pos_t data_aim;
     int action = 0;
@@ -289,8 +306,13 @@ void uart_task(void *p) {
 
             // Novo pacote com 7 bytes incluindo a ação
             uint8_t pacote[7] = {axis_aim, lsb, msb, axis_movement, val_movement, action_byte, end};
-            uart_write_blocking(UART_ID, pacote, sizeof(pacote));
+            uart_write_blocking(HC06_UART_ID, pacote, sizeof(pacote));
         }
+
+        // Funcionam:
+        // uint8_t pacote[7] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x00};
+        // uart_write_blocking(HC06_UART_ID, pacote, sizeof(pacote));
+        // uart_puts(HC06_UART_ID, "Hello from HC-06!\r\n");
     }
 }
 
@@ -311,8 +333,8 @@ int main() {
     xTaskCreate(process_input_task, "Process Input Task", 256, NULL, 1, NULL);
     xTaskCreate(x_task, "ADC X Task", 4095, NULL, 1, NULL);
     xTaskCreate(y_task, "ADC Y Task", 4095, NULL, 1, NULL);
-    xTaskCreate(uart_task, "UART Task", 4095, NULL, 1, NULL);
-    xTaskCreate(mpu6050_task, "mpu6050_Task 1", 8192, NULL, 1, NULL);
+    xTaskCreate(mpu6050_task, "mpu6050 Task 1", 8192, NULL, 1, NULL);
+    xTaskCreate(hc06_task, "hc06 Task", 4096, NULL, 1, NULL);
 
     vTaskStartScheduler();
 

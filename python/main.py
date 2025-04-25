@@ -118,7 +118,7 @@ def serial_ports():
                 pass
     elif sys.platform.startswith('linux') or sys.platform.startswith('cygwin'):
         # Linux/Cygwin
-        ports = glob.glob('/dev/tty[A-Za-z]*')
+        ports = glob.glob('/dev/tty[A-Za-z]*') + glob.glob('/dev/rfcomm*')
     elif sys.platform.startswith('darwin'):
         # macOS
         ports = glob.glob('/dev/tty.*')
