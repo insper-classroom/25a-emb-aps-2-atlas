@@ -54,15 +54,6 @@ void btn_callback(uint gpio, uint32_t events) {
     }
 }
 
-void send_actions(int val) {
-    uint8_t action_byte = (uint8_t)val;
-    uint8_t end = 0xFF;
-
-    // Novo pacote com 7 bytes incluindo a ação
-    uint8_t pacote[2] = {action_byte, end};
-    uart_write_blocking(HC06_UART_ID, pacote, sizeof(pacote));
-}
-
 void process_input_task(void *p) {
     gpio_init(BTN_PRIMARY_FIRE);
     gpio_init(BTN_SECONDARY_FIRE);
@@ -304,15 +295,9 @@ void hc06_task(void *p) {
             uint8_t action_byte = (uint8_t)action;
             uint8_t end = 0xFF;
 
-            // Novo pacote com 7 bytes incluindo a ação
             uint8_t pacote[7] = {axis_aim, lsb, msb, axis_movement, val_movement, action_byte, end};
             uart_write_blocking(HC06_UART_ID, pacote, sizeof(pacote));
         }
-
-        // Funcionam:
-        // uint8_t pacote[7] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x00};
-        // uart_write_blocking(HC06_UART_ID, pacote, sizeof(pacote));
-        // uart_puts(HC06_UART_ID, "Hello from HC-06!\r\n");
     }
 }
 

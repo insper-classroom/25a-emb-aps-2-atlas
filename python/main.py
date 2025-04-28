@@ -10,7 +10,6 @@ pyautogui.PAUSE = 0
 
 current_keys = {'w': False, 'a': False, 's': False, 'd': False}
 
-
 def movement(axis, value):
     if axis == 0:
         tecla_para_cima = 'w'
@@ -21,7 +20,7 @@ def movement(axis, value):
     else:
         return
 
-    if value == 1:
+    if value == 2:
         if not current_keys[tecla_para_cima]:
             pyautogui.keyDown(tecla_para_cima)
             current_keys[tecla_para_cima] = True
@@ -30,7 +29,7 @@ def movement(axis, value):
             pyautogui.keyUp(tecla_para_baixo)
             current_keys[tecla_para_baixo] = False
 
-    elif value == 2:
+    elif value == 1:
         if not current_keys[tecla_para_baixo]:
             pyautogui.keyDown(tecla_para_baixo)
             current_keys[tecla_para_baixo] = True

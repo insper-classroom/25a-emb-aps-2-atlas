@@ -24,5 +24,4 @@ bool hc06_set_pin(char pin[]);
 bool hc06_set_at_mode(int on);
 bool hc06_init(char name[], char pin[]);
 
-
 #endif // HC06_H_
