@@ -14,7 +14,7 @@ O objetivo deste projeto é criar um protótipo funcional de um controle customi
 
 ### **Inputs (Sensores e Controles)**
 
-![image](./.github/portal_gun_controller.png)
+![image](./.github/diagram.png)
 
 - **Botões físicos:**
   - Pular
@@ -50,7 +50,7 @@ O objetivo deste projeto é criar um protótipo funcional de um controle customi
 
 ## 🖼️ Imagens do Controle
 
-(Aqui serão inseridas imagens do protótipo)
+![image](./.github/prototipo.jpeg)
 
 ## 🔗 Links Úteis
 
@@ -60,4 +60,3 @@ O objetivo deste projeto é criar um protótipo funcional de um controle customi
 
 ---
 Este projeto é um protótipo experimental e está em desenvolvimento contínuo. Contribuições e sugestões são bem-vindas! 🚀
-
